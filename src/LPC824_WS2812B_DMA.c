@@ -273,18 +273,23 @@ static SPI_DATA_SETUP_T XfSetup;
 
 #define BUFFER_SIZE 24
 
+// 0b11000000
 #define T0 0xc0
+// 0b11111000
 #define T1 0xf8
+
+#define TM 0xfe
 
 /* Tx buffer */
 static uint16_t TxBuf[BUFFER_SIZE] = {
-		T0,T0,T0,T0,T0,T0,T0,T0,
-		T0,T0,T0,T0,T0,T0,T0,T0,
-		T0,T0,T1,T1,T0,T1,T1,T1
+		T0,T0,T0,T0, T0,T0,T0,T0, // G
+		T0,T0,T0,T0, T0,T0,T0,T0, // R
+		T1,T1,T1,T1, T1,T1,T1,T1  // B
 };
 
 /* Rx buffer */
-static uint16_t RxBuf[BUFFER_SIZE];
+//static uint16_t RxBuf[BUFFER_SIZE];
+
 /**
  * Write to WS2812B using SPI MOSI
  */
@@ -293,8 +298,6 @@ void dma_spi_start () {
 	//
 	// Setup SPI
 	//
-
-
 	Chip_SPI_Init(LPC_SPI0);
 	Chip_SPI_ConfigureSPI(LPC_SPI0,
 			SPI_MODE_MASTER
@@ -305,14 +308,6 @@ void dma_spi_start () {
 
 
 	LPC_SPI0->DIV = 3;
-	//Chip_SPI_CalClkRateDivider(LPC_SPI0, 500000);
-/*
-	DelayConfigStruct.FrameDelay = 0;
-	DelayConfigStruct.PostDelay = 0;
-	DelayConfigStruct.PreDelay = 0;
-	DelayConfigStruct.TransferDelay = 0;
-	Chip_SPI_DelayConfig(LPC_SPI0, &DelayConfigStruct);
-*/
 
 	// Assign MOSI pin. Other SPI lines not of interest in this application.
 	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);
@@ -323,13 +318,6 @@ void dma_spi_start () {
 	Chip_SPI_EnableMasterMode(LPC_SPI0);
 	Chip_SPI_Enable(LPC_SPI0);
 
-/*
-	XfSetup.Length = BUFFER_SIZE;
-	XfSetup.pTx = TxBuf;
-	XfSetup.RxCnt = XfSetup.TxCnt = 0;
-	XfSetup.DataSize = 8;
-	XfSetup.pRx = RxBuf;
-*/
 	int i,j,k;
 	for (i =0; i < 100000000; i++) {
 
@@ -347,18 +335,18 @@ void dma_spi_start () {
 
 		// RESET
 		for (j = 0; j < 100; j++) {
-			while (!LPC_SPI0->STAT&SPI_STAT_TXRDY) {}
+			while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
 			LPC_SPI0->TXDAT = 0;
 		}
 
-		for (k = 0; k < 8; k++) {
-		for (j = 0; j < 24; j++) {
-			while (!LPC_SPI0->STAT&SPI_STAT_TXRDY) {}
-			LPC_SPI0->TXDAT = TxBuf[j];
-		}
+		for (k = 0; k < 16; k++) {
+			for (j = 0; j < 24; j++) {
+				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
+				LPC_SPI0->TXDAT = TxBuf[j];
+			}
 		}
 
-		Chip_SPI_SendLastFrame_RxIgnore(LPC_SPI0,TxBuf[23],8);
+		Chip_SPI_SendLastFrame_RxIgnore(LPC_SPI0,0,8);
 
 
 		/* Make sure the last frame sent completely*/
