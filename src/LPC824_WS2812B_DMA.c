@@ -267,9 +267,6 @@ void dma_sct_start() {
 
 }
 
-// static SPI_CONFIG_T ConfigStruct;
-static SPI_DELAY_CONFIG_T DelayConfigStruct;
-static SPI_DATA_SETUP_T XfSetup;
 
 #define BUFFER_SIZE 24
 
@@ -278,17 +275,46 @@ static SPI_DATA_SETUP_T XfSetup;
 // 0b11111000
 #define T1 0xf8
 
-#define TM 0xfe
-
 /* Tx buffer */
-static uint16_t TxBuf[BUFFER_SIZE] = {
+static uint8_t TxBuf0[BUFFER_SIZE] = {
+		T0,T0,T0,T0, T0,T0,T0,T0, // G
+		T1,T1,T1,T1, T0,T0,T0,T0, // R
+		T0,T0,T0,T0, T0,T0,T0,T0  // B
+};
+static uint8_t TxBuf1[BUFFER_SIZE] = {
+		T1,T1,T1,T1, T0,T0,T0,T0, // G
+		T1,T1,T1,T1, T0,T0,T0,T0, // R
+		T0,T0,T0,T0, T0,T0,T0,T0  // B
+};
+static uint8_t TxBuf2[BUFFER_SIZE] = {
+		T1,T1,T1,T1, T0,T0,T0,T0, // G
+		T0,T0,T0,T0, T0,T0,T0,T0, // R
+		T0,T0,T0,T0, T0,T0,T0,T0  // B
+};
+static uint8_t TxBuf3[BUFFER_SIZE] = {
 		T0,T0,T0,T0, T0,T0,T0,T0, // G
 		T0,T0,T0,T0, T0,T0,T0,T0, // R
 		T1,T1,T1,T1, T1,T1,T1,T1  // B
 };
-
 /* Rx buffer */
 //static uint16_t RxBuf[BUFFER_SIZE];
+
+void set_rgb (uint8_t *buf, uint32_t rgb) {
+	int i;
+	for (i = 16; i < 24; i++) {
+		buf[i] = rgb&1 ? T1 : T0;
+		rgb >>= 1;
+	}
+	for (i = 0; i < 8; i++) {
+		buf[i] = rgb&1 ? T1 : T0;
+		rgb >>= 1;
+	}
+	for (i = 8; i < 16; i++) {
+		buf[i] = rgb&1 ? T1 : T0;
+		rgb >>= 1;
+	}
+}
+
 
 /**
  * Write to WS2812B using SPI MOSI
@@ -332,6 +358,8 @@ void dma_spi_start () {
 				| SPI_TXCTL_EOF
 				| SPI_TXCTL_RXIGNORE);
 
+		//set_rgb(TxBuf, 0xff0000);
+
 
 		// RESET
 		for (j = 0; j < 100; j++) {
@@ -339,10 +367,31 @@ void dma_spi_start () {
 			LPC_SPI0->TXDAT = 0;
 		}
 
-		for (k = 0; k < 16; k++) {
+		for (k = 0; k < 4; k++) {
 			for (j = 0; j < 24; j++) {
 				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
-				LPC_SPI0->TXDAT = TxBuf[j];
+				LPC_SPI0->TXDAT = TxBuf0[j];
+			}
+		}
+
+		for (k = 0; k < 4; k++) {
+			for (j = 0; j < 24; j++) {
+				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
+				LPC_SPI0->TXDAT = TxBuf1[j];
+			}
+		}
+
+		for (k = 0; k < 4; k++) {
+			for (j = 0; j < 24; j++) {
+				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
+				LPC_SPI0->TXDAT = TxBuf2[j];
+			}
+		}
+
+		for (k = 0; k < 4; k++) {
+			for (j = 0; j < 24; j++) {
+				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
+				LPC_SPI0->TXDAT = TxBuf3[j];
 			}
 		}
 
