@@ -296,6 +296,13 @@ static uint8_t TxBuf3[BUFFER_SIZE] = {
 		T0,T0,T0,T0, T0,T0,T0,T0, // R
 		T1,T1,T1,T1, T1,T1,T1,T1  // B
 };
+
+static uint8_t* buffers[4] = {
+		TxBuf0,
+		TxBuf1,
+		TxBuf2,
+		TxBuf3
+};
 /* Rx buffer */
 //static uint16_t RxBuf[BUFFER_SIZE];
 
@@ -319,7 +326,7 @@ void set_rgb (uint8_t *buf, uint32_t rgb) {
 /**
  * Write to WS2812B using SPI MOSI
  */
-void dma_spi_start () {
+void spi_loop_start () {
 
 	//
 	// Setup SPI
@@ -362,7 +369,8 @@ void dma_spi_start () {
 
 
 		// RESET
-		for (j = 0; j < 100; j++) {
+		// 100 iterations will do
+		for (j = 0; j < 100000; j++) {
 			while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
 			LPC_SPI0->TXDAT = 0;
 		}
@@ -370,28 +378,30 @@ void dma_spi_start () {
 		for (k = 0; k < 4; k++) {
 			for (j = 0; j < 24; j++) {
 				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
-				LPC_SPI0->TXDAT = TxBuf0[j];
+				LPC_SPI0->TXDAT = buffers[i&0x3][j];
 			}
 		}
 
 		for (k = 0; k < 4; k++) {
 			for (j = 0; j < 24; j++) {
 				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
-				LPC_SPI0->TXDAT = TxBuf1[j];
+				LPC_SPI0->TXDAT = buffers[(i+1)&0x3][j];
 			}
 		}
 
 		for (k = 0; k < 4; k++) {
 			for (j = 0; j < 24; j++) {
 				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
-				LPC_SPI0->TXDAT = TxBuf2[j];
+				//LPC_SPI0->TXDAT = TxBuf2[j];
+				LPC_SPI0->TXDAT = buffers[(i+2)&0x3][j];
 			}
 		}
 
 		for (k = 0; k < 4; k++) {
 			for (j = 0; j < 24; j++) {
 				while (!(LPC_SPI0->STAT&SPI_STAT_TXRDY)) {}
-				LPC_SPI0->TXDAT = TxBuf3[j];
+				//LPC_SPI0->TXDAT = TxBuf3[j];
+				LPC_SPI0->TXDAT = buffers[(i+3)&0x3][j];
 			}
 		}
 
@@ -408,77 +418,92 @@ void dma_spi_start () {
 
 
 
-		/* DMA initialization - enable DMA clocking and reset DMA if needed */
-		Chip_DMA_Init(LPC_DMA);
-		/* Enable DMA controller and use driver provided DMA table for current descriptors */
-		Chip_DMA_Enable(LPC_DMA);
-		Chip_DMA_SetSRAMBase(LPC_DMA, DMA_ADDR(Chip_DMA_Table));
-
-		/* Setup channel 0 for the following configuration:
-		   - High channel priority
-		   - Interrupt A fires on descriptor completion */
-		Chip_DMA_EnableChannel(LPC_DMA, DMA_CH0);
-		Chip_DMA_EnableIntChannel(LPC_DMA, DMA_CH0);
-		Chip_DMA_SetupChannelConfig(LPC_DMA, DMA_CH0,
-				(
-						//DMA_CFG_HWTRIGEN
-						DMA_CFG_PERIPHREQEN  //?? what's this for???
-						//| DMA_CFG_TRIGTYPE_EDGE
-						//| DMA_CFG_TRIGPOL_HIGH
-						//| DMA_CFG_TRIGBURST_BURST
-						| DMA_CFG_TRIGBURST_SNGL
-						//| DMA_CFG_BURSTPOWER_1
-						 | DMA_CFG_CHPRIORITY(0)
-						 ));
-
-		// Use SCT to trigger DMA xfer
-		//Chip_DMATRIGMUX_SetInputTrig(LPC_DMATRIGMUX, DMA_CH0, DMATRIG_SCT0_DMA0);
-
-		// note that addresses must
-		// be the END address for source and destination, not the starting address.
-		// DMA operations moves from end to start. [Ref ].
-
-		dmaDescB.xfercfg = DMA_XFERCFG_CFGVALID
-											| DMA_XFERCFG_SETINTA
-											| DMA_XFERCFG_SWTRIG
-											 | DMA_XFERCFG_WIDTH_8
-											 | DMA_XFERCFG_SRCINC_1
-											 | DMA_XFERCFG_DSTINC_0
-											 | DMA_XFERCFG_XFERCOUNT(DMA_BUFFER_SIZE);
-		dmaDescB.source = DMA_ADDR(&dma_buffer[DMA_BUFFER_SIZE]-1) ;
-		dmaDescB.dest = DMA_ADDR ( &LPC_SPI0->TXDAT );
-		dmaDescB.next = DMA_ADDR(0); // no more descriptors
+}
 
 
-		// ADC data register is source of DMA
-		dmaDescA.source = DMA_ADDR(&dma_buffer[DMA_BUFFER_SIZE]-1) ;
-		dmaDescA.dest =  DMA_ADDR ( &LPC_SCT->MATCHREL[1].U );
-		//dmaDescA.next = (uint32_t)&dmaDescB;
-		dmaDescA.next = DMA_ADDR(0);
+void spi_dma_start() {
 
+	//
+	// Setup SPI
+	//
+	Chip_SPI_Init(LPC_SPI0);
+	Chip_SPI_ConfigureSPI(LPC_SPI0, SPI_MODE_MASTER
+	//SPI_MODE_TEST |	/* Enable master/Slave mode */
+			| SPI_CLOCK_CPHA0_CPOL0 /* Set Clock polarity to 0 */
+			| SPI_CFG_MSB_FIRST_EN /* Enable MSB first option */
+			| SPI_CFG_SPOL_LO); /* Chipselect is active low */
 
+	LPC_SPI0->DIV = 3;
 
-		// Enable DMA interrupt. Will be invoked at end of DMA transfer.
-		NVIC_EnableIRQ(DMA_IRQn);
+	// Assign MOSI pin. Other SPI lines not of interest in this application.
+	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);
+	Chip_SWM_MovablePinAssign(SWM_SPI0_MOSI_IO, PIN_WS2812B);
+	Chip_SWM_MovablePinAssign(SWM_SPI0_SCK_IO, PIN_DEBUG);
+	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
 
-		/* Setup transfer descriptor and validate it */
-		Chip_DMA_SetupTranChannel(LPC_DMA, DMA_CH0, &dmaDescA);
-		Chip_DMA_SetValidChannel(LPC_DMA, DMA_CH0);
+	Chip_SPI_EnableMasterMode(LPC_SPI0);
+	Chip_SPI_Enable(LPC_SPI0);
 
-		// Setup data transfer and hardware trigger
-		// See "Transfer Configuration registers" UM10800, §12.6.18, Table 173, page 179
-		Chip_DMA_SetupChannelTransfer(LPC_DMA, DMA_CH0,
-				 (
-					DMA_XFERCFG_CFGVALID  // Channel descriptor is considered valid
-					//| DMA_XFERCFG_RELOAD  // Causes DMA to move to next descriptor when complete
-					| DMA_XFERCFG_SETINTA // DMA Interrupt A (A vs B can be read in ISR)
-					//| DMA_XFERCFG_SWTRIG  // When written by software, the trigger for this channel is set immediately.
-					| DMA_XFERCFG_WIDTH_8 // 8,16,32 bits allowed
-					| DMA_XFERCFG_SRCINC_1 // increment src by 1 x width
-					| DMA_XFERCFG_DSTINC_0 // do not increment dst
-					| DMA_XFERCFG_XFERCOUNT(DMA_BUFFER_SIZE)
-					)
-					);
+	/* DMA initialization - enable DMA clocking and reset DMA if needed */
+	Chip_DMA_Init(LPC_DMA);
+	/* Enable DMA controller and use driver provided DMA table for current descriptors */
+	Chip_DMA_Enable(LPC_DMA);
+	Chip_DMA_SetSRAMBase(LPC_DMA, DMA_ADDR(Chip_DMA_Table));
+
+	/* Setup channel 0 for the following configuration:
+	 - High channel priority
+	 - Interrupt A fires on descriptor completion */
+	Chip_DMA_EnableChannel(LPC_DMA, DMA_CH0);
+	Chip_DMA_EnableIntChannel(LPC_DMA, DMA_CH0);
+	Chip_DMA_SetupChannelConfig(LPC_DMA, DMA_CH0, (
+			0
+	| DMA_CFG_HWTRIGEN
+			// | DMA_CFG_PERIPHREQEN  //?? what's this for???
+			//| DMA_CFG_TRIGTYPE_EDGE
+			//| DMA_CFG_TRIGPOL_HIGH
+			//| DMA_CFG_TRIGBURST_BURST
+			//		| DMA_CFG_TRIGBURST_SNGL
+					| DMA_CFG_BURSTPOWER_1
+					| DMA_CFG_CHPRIORITY(0)));
+
+	// Use SCT to trigger DMA xfer
+	//Chip_DMATRIGMUX_SetInputTrig(LPC_DMATRIGMUX, DMA_CH0, DMATRIG_SCT0_DMA0);
+
+	// note that addresses must
+	// be the END address for source and destination, not the starting address.
+	// DMA operations moves from end to start. [Ref ].
+
+	dmaDescB.xfercfg = DMA_XFERCFG_CFGVALID | DMA_XFERCFG_SETINTA
+			| DMA_XFERCFG_SWTRIG | DMA_XFERCFG_WIDTH_8 | DMA_XFERCFG_SRCINC_1
+			| DMA_XFERCFG_DSTINC_0 | DMA_XFERCFG_XFERCOUNT(24);
+	dmaDescB.source = DMA_ADDR(&TxBuf1[24] - 1);
+	dmaDescB.dest = DMA_ADDR(&LPC_SPI0->TXDAT);
+	dmaDescB.next = DMA_ADDR(0); // no more descriptors
+
+	// ADC data register is source of DMA
+	dmaDescA.source = DMA_ADDR(&TxBuf0[24] - 1);
+	dmaDescA.dest = DMA_ADDR(&LPC_SPI0->TXDAT);
+	//dmaDescA.next = (uint32_t) & dmaDescB;
+	dmaDescA.next = DMA_ADDR(0);
+
+	// Enable DMA interrupt. Will be invoked at end of DMA transfer.
+	NVIC_EnableIRQ(DMA_IRQn);
+
+	/* Setup transfer descriptor and validate it */
+	Chip_DMA_SetupTranChannel(LPC_DMA, DMA_CH0, &dmaDescA);
+	Chip_DMA_SetValidChannel(LPC_DMA, DMA_CH0);
+
+	// Setup data transfer and hardware trigger
+	// See "Transfer Configuration registers" UM10800, §12.6.18, Table 173, page 179
+	Chip_DMA_SetupChannelTransfer(LPC_DMA, DMA_CH0, (
+	DMA_XFERCFG_CFGVALID  // Channel descriptor is considered valid
+	//| DMA_XFERCFG_RELOAD  // Causes DMA to move to next descriptor when complete
+			| DMA_XFERCFG_SETINTA // DMA Interrupt A (A vs B can be read in ISR)
+			| DMA_XFERCFG_SWTRIG  // When written by software, the trigger for this channel is set immediately.
+			| DMA_XFERCFG_WIDTH_8 // 8,16,32 bits allowed
+			| DMA_XFERCFG_SRCINC_1 // increment src by 1 x width
+			| DMA_XFERCFG_DSTINC_0 // do not increment dst
+			| DMA_XFERCFG_XFERCOUNT(24)));
 
 }
 
@@ -525,7 +550,9 @@ int main(void) {
 
 		dmaDone = false;
 		debug_pin_pulse(8);
-		dma_spi_start();
+		spi_loop_start();
+		//spi_dma_start();
+
 		while (!dmaDone) {
 			__WFI();
 		}
